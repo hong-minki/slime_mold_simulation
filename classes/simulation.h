@@ -10,6 +10,10 @@ private:
 	const SimConfig& my_config;
 	std::vector<double_vector2d>& cells_coordinate;
 	std::vector<double>& chem_conc_field;
+	std::vector<int> num_cells; 
+
+	void cells_update();	
+	void diffusion_calculation();
 
 public:
 	simulation(const SimConfig& incoming_config, std::vector<double_vector2d>& incoming_cells_coordinate, std::vector<double>& incoming_chem_conc_field);

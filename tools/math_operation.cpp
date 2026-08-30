@@ -36,24 +36,3 @@ double_vector2d discrete_gradient(const SimConfig& config, const int_vector2d co
 }
 
 //Simulation Tools
-
-void diffusion_calculation(const SimConfig& config, std::vector<double>& chem_conc_field, std::vector<int>& num_cells)
-{
-	std::vector<double> next_chem_conc_field = chem_conc_field;
-
-	for (int y = 0; y < config.height; ++y)
-	{
-		for (int x = 0; x < config.width; ++x)
-		{
-			int_vector2d coordinate_vector = { x, y };
-
-			int center_index = get_index(coordinate_vector, config.width, config.height);
-			double chem_conc_new = chem_conc_field[center_index] + config.dt * (config.diffusion_rate * discrete_laplacian(config, coordinate_vector, chem_conc_field)
-				- config.decay_rate * chem_conc_field[center_index]
-				+ config.chem_secretion_rate * num_cells[center_index]);
-			if (chem_conc_new < 0.0) chem_conc_new = 0.0;
-			next_chem_conc_field[center_index] = chem_conc_new;
-		}
-	}
-	chem_conc_field.swap(next_chem_conc_field);
-}
