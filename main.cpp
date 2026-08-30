@@ -25,14 +25,16 @@ int main()
 		2.0,    // chi (Chemotaxis strength)
 		0.5     // Dr (Random diffusion) 
 	};
+	
+	std::random_device rd;
+	std::mt19937 rng{ rd() };
 
 
-
-	class world_setup world(my_config);
+	class world_setup world(my_config, rng);
 	std::vector<double_vector2d> cells_coordinate{ world.random_cell_distribution() };
 	std::vector<double> chem_conc_field{ world.chem_conc_field_initialisation_square() };
 
-	class simulation sim(my_config, cells_coordinate, chem_conc_field);
+	class simulation sim(my_config, rng, cells_coordinate, chem_conc_field);
 	sim.run_simulation();
 
 	wait_closing();

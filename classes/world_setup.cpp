@@ -1,9 +1,8 @@
 #include "world_setup.h"
 
-world_setup::world_setup(const SimConfig& incoming_config)
-	: my_config(incoming_config),
-      rd{},                                       
-      rng{ rd() },                                  
+world_setup::world_setup(const SimConfig& incoming_config, std::mt19937& incoming_rng)
+	: my_config(incoming_config),                                    
+      rng(incoming_rng),
       dist_x{ 0.0, my_config.width * my_config.dx },
       dist_y{ 0.0, my_config.height * my_config.dx }
 {
