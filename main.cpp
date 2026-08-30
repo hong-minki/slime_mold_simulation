@@ -12,7 +12,7 @@ int main()
 	constexpr SimConfig my_config
 	{ 
 		0.1,    // dt
-		2000,   // total_timesteps
+		4000,   // total_timesteps
 		1.0,    // dx
 		100,    // width
 		100,    // height
