@@ -21,6 +21,11 @@ std::vector<double_vector2d> world_setup::random_cell_distribution()
 	return cells_coordinates;
 }   
 
+std::vector<double> world_setup::chem_conc_field_initialisation_empty()
+{
+	std::vector<double> chem_conc_field(my_config.total_grid_points(), 0.0);
+	return chem_conc_field;
+}
 
 std::vector<double> world_setup::chem_conc_field_initialisation_square()
 {

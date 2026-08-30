@@ -20,4 +20,5 @@ public:
 
 	std::vector<double_vector2d> random_cell_distribution();
 	std::vector<double> chem_conc_field_initialisation_square();
+	std::vector<double> chem_conc_field_initialisation_empty();
 };
