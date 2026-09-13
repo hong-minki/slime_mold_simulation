@@ -4,6 +4,7 @@ from matplotlib.animation import FuncAnimation
 from pathlib import Path
 
 import imageio_ffmpeg
+
 plt.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
 
 # 1. Locate file
