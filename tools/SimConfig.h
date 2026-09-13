@@ -31,3 +31,4 @@ struct double_vector2d
     double x;
     double y;
 };
+

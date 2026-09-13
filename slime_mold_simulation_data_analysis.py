@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from pathlib import Path
 import imageio_ffmpeg
+import json
+
+
+#run this first for animation %matplotlib qt
 
 # Map the ffmpeg executable for saving videos
 plt.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
@@ -10,8 +14,14 @@ plt.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
 def load_data():
     script_dir = Path(__file__).resolve().parent
     warehouse_path = script_dir / "out" / "build" / "x64-Debug"
+    
+    config_path = warehouse_path / "sim_config.json"
+    with open(config_path, "r") as f:
+        config = json.load(f)
+        
     cell_raw = np.fromfile(warehouse_path / "cell_history.bin", dtype=np.int32)
-    return cell_raw
+    
+    return config, cell_raw
 
 def compute_radial_power_spectrum(grid):
     grid_fluctuation = grid - np.mean(grid)
@@ -89,15 +99,21 @@ def animate_combined(cell_stack, spectra_series, step_skip, interval):
 # ==========================================
 # GLOBAL EXECUTION 
 # ==========================================
-width = 100
-height = 100
+
+config, cell_raw = load_data()
+
+# Now you can use them directly for your plots or arrays
+width = config["width"]
+height = config["height"]
+total_cells = config["total_cells"]
+mean_cell_density = total_cells / (width * height)
+
 step_skip = 10
 
 # --- THE SWITCH ---
 # Set to True to output an MP4 file. Set to False to play interactively in Spyder.
-SAVE_VIDEO = True
+SAVE_VIDEO = False
 
-cell_raw = load_data()
 cell_stack = cell_raw.reshape(-1, height, width)[::step_skip]
 spectra_series = get_power_spectra_series(cell_stack)
 

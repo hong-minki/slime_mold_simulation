@@ -7,6 +7,24 @@
 #include "classes/world_setup.h"
 #include "classes/simulation.h"
 
+void export_config_to_json(const SimConfig& cfg, const std::string& filename) {
+	std::ofstream out(filename);
+	out << "{\n";
+	out << "  \"dt\": " << cfg.dt << ",\n";
+	out << "  \"total_timesteps\": " << cfg.total_timesteps << ",\n";
+	out << "  \"dx\": " << cfg.dx << ",\n";
+	out << "  \"width\": " << cfg.width << ",\n";
+	out << "  \"height\": " << cfg.height << ",\n";
+	out << "  \"diffusion_rate\": " << cfg.diffusion_rate << ",\n";
+	out << "  \"decay_rate\": " << cfg.decay_rate << ",\n";
+	out << "  \"chem_secretion_rate\": " << cfg.chem_secretion_rate << ",\n";
+	out << "  \"total_cells\": " << cfg.total_cells << ",\n";
+	out << "  \"chi\": " << cfg.chi << ",\n";
+	out << "  \"Dr\": " << cfg.Dr << "\n"; // Notice no comma on the last item
+	out << "}\n";
+	out.close();
+}
+
 int main()
 {
 	constexpr SimConfig my_config
@@ -26,6 +44,8 @@ int main()
 		0.5     // Dr (Random diffusion) 
 	};
 	
+	export_config_to_json(my_config, "sim_config.json");
+
 	std::random_device rd;
 	std::mt19937 rng{ rd() };
 
