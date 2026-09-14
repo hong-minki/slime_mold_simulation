@@ -32,14 +32,14 @@ int main()
 		0.001,    // dt
 		2000,   // total_timesteps
 		1.0,    // dx
-		100,    // width
-		100,    // height
+		32,    // width
+		32,    // height
 		1.0,	// diffusion_rate
 		0.1,    // decay_rate
 		1.0,	// chem_secretion_rate
 
 		//Cell properties
-		100000000,   // total_cells
+		10240000,   // total_cells
 		2.0,    // chi (Chemotaxis strength)
 		0.5     // Dr (Random diffusion) 
 	};
