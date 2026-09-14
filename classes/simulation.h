@@ -14,6 +14,7 @@ private:
 	std::vector<double>& chem_conc_field;
 	std::vector<int> num_cells; 
 
+	void map_cells_to_grid();
 	void cells_update();	
 	void diffusion_calculation();
 

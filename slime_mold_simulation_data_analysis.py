@@ -4,7 +4,7 @@ from matplotlib.animation import FuncAnimation
 from pathlib import Path
 import imageio_ffmpeg
 import json
-
+import scipy.ndimage as ndi
 
 #run this first for animation %matplotlib qt
 
@@ -22,6 +22,36 @@ def load_data():
     cell_raw = np.fromfile(warehouse_path / "cell_history.bin", dtype=np.int32)
     
     return config, cell_raw
+
+def get_smoothed_cell_stack(cell_stack, method='box', size=3):
+    """
+    Applies spatial convolution across every time step to create
+    a continuous, floating-point density field.
+    """
+    smoothed_stack = []
+    
+    for grid in cell_stack:
+        grid_float = grid.astype(np.float64)
+        
+        if method == 'box':
+            smoothed_grid = ndi.uniform_filter(grid_float, size=size, mode='wrap')
+        elif method == 'gaussian':
+            smoothed_grid = ndi.gaussian_filter(grid_float, sigma=size, mode='wrap')
+        else:
+            raise ValueError("Method must be 'box' or 'gaussian'")
+            
+        smoothed_stack.append(smoothed_grid)
+        
+    return np.array(smoothed_stack)
+
+def get_max_density_series(smoothed_cell_stack):
+    """
+    Extracts the peak scalar density (rho_max) at each time step.
+    Returns a 1D array of shape (time_steps,).
+    """
+    # Maximize across the spatial grid (axes 1 and 2: height and width)
+    return np.max(smoothed_cell_stack, axis=(1, 2))
+        
 
 def compute_radial_power_spectrum(grid):
     grid_fluctuation = grid - np.mean(grid)
@@ -48,51 +78,113 @@ def get_power_spectra_series(cell_stack):
         spectra_history.append(spectrum)
     return np.array(spectra_history)
 
-def animate_combined(cell_stack, spectra_series, step_skip, interval):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+#Visualisation
+def plot_max_density(max_density_series, dt, step_skip, rho_0=None):
+    time_steps = np.arange(len(max_density_series)) * dt
     
-    # --- AX 1: Real Space ---
-    cell_vmin, cell_vmax = cell_stack.min(), cell_stack.max()
-    img_cell = ax1.imshow(cell_stack[0], cmap='inferno', vmin=cell_vmin, vmax=cell_vmax, origin='lower')
-    ax1.set_title("Cell Distribution", fontsize=14)
-    fig.colorbar(img_cell, ax=ax1, fraction=0.046, pad=0.04, label="Cell Density")
+    plt.figure(figsize=(8, 5))
+    plt.plot(time_steps * step_skip, max_density_series, color='royalblue', lw=2, label=r'$\max(\rho)$')
+    
+    if rho_0 is not None:
+        plt.axhline(1.1 * rho_0, color='crimson', linestyle='--', label=r'10% Threshold ($1.1\rho_0$)')
+        plt.axhline(rho_0, color='gray', linestyle=':', label=r'Mean Density ($\rho_0$)')
+        
+    plt.xlabel('Time (time_steps * dt)')
+    plt.ylabel('Maximum Local Density')
+    plt.title('Evolution of Peak Density')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    if rho_0 is not None:
+        plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+def animate_combined(smoothed_stack, cell_stack, spectra_series, dt, step_skip, interval):
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
+
+    # --- AX 1: Smoothed Cell Density ---
+    smooth_vmin, smooth_vmax = smoothed_stack.min(), smoothed_stack.max()
+    img_smooth = ax1.imshow(
+        smoothed_stack[0],
+        cmap="inferno",
+        vmin=smooth_vmin,
+        vmax=smooth_vmax,
+        origin="lower",
+    )
+    ax1.set_title("Smoothed Cell Density", fontsize=13)
+    fig.colorbar(
+        img_smooth, ax=ax1, fraction=0.046, pad=0.04, label="Density (smoothed)"
+    )
     ax1.set_xlabel("x coordinate")
     ax1.set_ylabel("y coordinate")
-    
-    # --- AX 2: Fourier Space ---
+
+    # --- AX 2: Raw Cell Distribution ---
+    cell_vmin, cell_vmax = cell_stack.min(), cell_stack.max()
+    img_cell = ax2.imshow(
+        cell_stack[0],
+        cmap="inferno",
+        vmin=cell_vmin,
+        vmax=cell_vmax,
+        origin="lower",
+    )
+    ax2.set_title("Raw Cell Distribution", fontsize=13)
+    fig.colorbar(
+        img_cell, ax=ax2, fraction=0.046, pad=0.04, label="Cell Count"
+    )
+    ax2.set_xlabel("x coordinate")
+    ax2.set_ylabel("y coordinate")
+
+    # --- AX 3: Scalar Power Spectrum ---
     num_bins = spectra_series.shape[1]
-    global_max = np.max(spectra_series[:, 1:]) 
-    
-    ax2.set_xlim(1, num_bins // 2) 
-    ax2.set_ylim(0, global_max * 1.1)
-    ax2.set_title("Evolution of Scalar Power Spectrum", fontsize=14)
-    ax2.set_xlabel("Scalar Wavenumber (k bin)")
-    ax2.set_ylabel("Averaged Power")
-    ax2.grid(True, linestyle="--", alpha=0.6)
-    
-    line, = ax2.plot([], [], lw=2.5, color='dodgerblue')
-    time_text = ax2.text(0.65, 0.90, '', transform=ax2.transAxes, 
-                         fontsize=12, fontweight='bold',
-                         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.9))
-    
+    global_max = np.max(spectra_series[:, 1:])
+
+    ax3.set_xlim(1, num_bins // 2)
+    ax3.set_ylim(0, global_max * 1.1)
+    ax3.set_title("Evolution of Power Spectrum", fontsize=13)
+    ax3.set_xlabel("Scalar Wavenumber (k bin)")
+    ax3.set_ylabel("Averaged Power")
+    ax3.grid(True, linestyle="--", alpha=0.6)
+
+    (line,) = ax3.plot([], [], lw=2.5, color="dodgerblue")
+    time_text = ax3.text(
+        0.55,
+        0.90,
+        "",
+        transform=ax3.transAxes,
+        fontsize=11,
+        fontweight="bold",
+        bbox=dict(
+            boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.9
+        ),
+    )
+
     plt.tight_layout()
-    
+
     def init():
+        img_smooth.set_data(smoothed_stack[0])
         img_cell.set_data(cell_stack[0])
         line.set_data([], [])
-        time_text.set_text('')
-        return img_cell, line, time_text
+        time_text.set_text("")
+        return img_smooth, img_cell, line, time_text
 
     def update(frame):
+        img_smooth.set_data(smoothed_stack[frame])
         img_cell.set_data(cell_stack[frame])
         line.set_data(np.arange(num_bins), spectra_series[frame])
-        time_text.set_text(f'Time Step: {frame * step_skip}')
-        return img_cell, line, time_text
+        # Calculate actual time using the time step interval (dt)
+        time_text.set_text(f"Time: {frame * step_skip * dt:.2f}")
+        return img_smooth, img_cell, line, time_text
 
-    ani = FuncAnimation(fig, update, frames=len(cell_stack),
-                        init_func=init, blit=True, interval=interval)
-    
-    # Removed plt.show() from here so the global switch can control playback
+    ani = FuncAnimation(
+        fig,
+        update,
+        frames=len(cell_stack),
+        init_func=init,
+        blit=True,
+        interval=interval,
+    )
+
     return ani
 
 
@@ -106,6 +198,8 @@ config, cell_raw = load_data()
 width = config["width"]
 height = config["height"]
 total_cells = config["total_cells"]
+total_timesteps = config["total_timesteps"]
+dt= config["dt"]
 mean_cell_density = total_cells / (width * height)
 
 step_skip = 10
@@ -115,9 +209,13 @@ step_skip = 10
 SAVE_VIDEO = False
 
 cell_stack = cell_raw.reshape(-1, height, width)[::step_skip]
+smoothed_stack = get_smoothed_cell_stack(cell_stack, method='box', size=3)
 spectra_series = get_power_spectra_series(cell_stack)
+max_density_series = get_max_density_series(smoothed_stack)
 
-ani = animate_combined(cell_stack, spectra_series, step_skip, interval=50)
+
+plot_max_density(max_density_series, dt, step_skip, mean_cell_density)
+ani = animate_combined(smoothed_stack, cell_stack, spectra_series, dt, step_skip, interval=50)
 
 # Control flow based on the switch
 if SAVE_VIDEO:

@@ -29,8 +29,8 @@ int main()
 {
 	constexpr SimConfig my_config
 	{ 
-		0.1,    // dt
-		20000,   // total_timesteps
+		0.001,    // dt
+		2000,   // total_timesteps
 		1.0,    // dx
 		100,    // width
 		100,    // height
@@ -39,7 +39,7 @@ int main()
 		1.0,	// chem_secretion_rate
 
 		//Cell properties
-		10000,   // total_cells
+		100000000,   // total_cells
 		2.0,    // chi (Chemotaxis strength)
 		0.5     // Dr (Random diffusion) 
 	};
