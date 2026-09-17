@@ -242,6 +242,9 @@ def extract_k_max_odr(k_array, power, sem, window=4, plot_fit=True):
         plt.show()
     
     return k_max_continuous, k_max_error#Visualisation
+
+
+#Visualisation
 def plot_max_density(max_density_series, dt, step_skip, rho_0=None):
     time_steps = np.arange(len(max_density_series)) * dt
     
