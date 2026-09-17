@@ -29,12 +29,12 @@ int main()
 {
 	constexpr SimConfig my_config
 	{ 
-		0.001,    // dt
-		2000,   // total_timesteps
+		0.00001,    // dt
+		4000,   // total_timesteps
 		1.0,    // dx
 		32,    // width
 		32,    // height
-		1.0,	// diffusion_rate
+		64,	// diffusion_rate
 		0.1,    // decay_rate
 		1.0,	// chem_secretion_rate
 
