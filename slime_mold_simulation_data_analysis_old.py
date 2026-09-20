@@ -21,7 +21,7 @@ def load_data():
     config_path = warehouse_path / "sim_config.json"
     with open(config_path, "r") as f:
         config = json.load(f)
-        
+            
     cell_raw = np.fromfile(warehouse_path / "cell_history.bin", dtype=np.int32)
     
     return config, cell_raw
