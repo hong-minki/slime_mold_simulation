@@ -5,8 +5,7 @@ from pathlib import Path
 import imageio_ffmpeg
 import json
 import scipy.ndimage as ndi
-from scipy import odr
-from scipy.optimize import curve_fit
+from scipy.optimize import minimize
 
 
 #run this first for animation %matplotlib qt
@@ -14,9 +13,9 @@ from scipy.optimize import curve_fit
 # Map the ffmpeg executable for saving videos
 plt.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
 
-def load_data():
+def load_data(folder_name):
     script_dir = Path(__file__).resolve().parent
-    warehouse_path = script_dir / "out" / "build" / "x64-Debug"
+    warehouse_path = (script_dir / ".." / "results" / folder_name).resolve()
     
     config_path = warehouse_path / "sim_config.json"
     with open(config_path, "r") as f:
@@ -46,203 +45,197 @@ def get_smoothed_cell_stack(cell_stack, method='box', size=3):
 def get_max_density_series(smoothed_cell_stack):
     return np.max(smoothed_cell_stack, axis=(1, 2))
         
-
-def compute_radial_power_spectrum(grid, bin_width):
-    min_points = 3
+def compute_power_spectrum(grid):
     grid_fluctuation = grid - np.mean(grid)
     fft2d = np.fft.fft2(grid_fluctuation)
-    fft2d_shifted = np.fft.fftshift(fft2d)
-    power_spectrum = np.abs(fft2d_shifted)**2
+    power_spectrum = np.abs(fft2d)**2
+    power_spectrum_array = power_spectrum.ravel()
     
-    y, x = np.indices(grid.shape)
-    center = (grid.shape[0] // 2, grid.shape[1] // 2)
+    Ny, Nx = grid.shape
+    fx = np.fft.fftfreq(Nx)
+    fy = np.fft.fftfreq(Ny)
+    fx_mesh, fy_mesh = np.meshgrid(fx, fy)
+    f_mesh = np.sqrt(fx_mesh**2 + fy_mesh**2)
+    f_array = f_mesh.ravel()
     
-    # 1. Keep distances as floats
-    r_float = np.sqrt((x - center[1])**2 + (y - center[0])**2)
-    
-    # 2. Scale by bin_width and convert to int for bincount
-    r_binned = np.floor(r_float / bin_width).astype(int)
-    
-    tbin = np.bincount(r_binned.ravel(), power_spectrum.ravel())
-    nr = np.bincount(r_binned.ravel())
-    
-    valid_bins = nr > 0
-    radial_profile = np.zeros_like(tbin, dtype=np.float64)
-    radial_profile[valid_bins] = tbin[valid_bins] / nr[valid_bins]
-    
-    tbin_sq = np.bincount(r_binned.ravel(), power_spectrum.ravel()**2)
-    mean_sq_power = np.zeros_like(tbin_sq, dtype=np.float64)
-    mean_sq_power[valid_bins] = tbin_sq[valid_bins] / nr[valid_bins]
-    
-    variance = np.maximum(mean_sq_power - radial_profile**2, 0)
-    
-    epsilon = 1e-10 
-    sem = np.zeros_like(variance)
-    
-    enough_points = nr >= min_points
-    sem[enough_points] = np.sqrt(variance[enough_points]) / np.sqrt(nr[enough_points]) + epsilon
-    sem[~enough_points] = np.inf 
-    
-    # 3. Explicitly construct the k-axis map
-    k_array = (np.arange(len(radial_profile)) + 0.5) * bin_width
-    
-    return k_array, radial_profile, sem
+    return f_array, power_spectrum_array
 
-def get_power_spectra_series(cell_stack, bin_width=0.5):
+def get_power_spectra_series(cell_stack):
     spectra_history = []
-    sem_history = []
-    k_array = None
+    f_array = None
     
     for grid in cell_stack:
-        k_arr, spectrum, sem = compute_radial_power_spectrum(grid, bin_width)
+        f_arr, spectrum = compute_power_spectrum(grid)
         
         # Capture the k_array once (it's identical for all frames)
-        if k_array is None:
-            k_array = k_arr
+        if f_array is None:
+            f_array = f_arr
             
         spectra_history.append(spectrum)
-        sem_history.append(sem)
         
-    return k_array, np.array(spectra_history), np.array(sem_history)
+    return f_array, np.array(spectra_history)
 
-#Fitting 
+def bin_spectra_series(f_array, spectra_series, bin_width=None):
+    """
+    Bins flattened 1D power spectra arrays into radially averaged frequency bins.
+    
+    Parameters:
+    - f_array: 1D array of frequency magnitudes.
+    - spectra_series: 2D array of shape (num_frames, len(f_array)) with raw power data.
+    - bin_width: The width of each frequency bin. If None, it defaults to roughly 
+                 one frequency step (1.0 / Nx).
+    
+    Returns:
+    - binned_f: 1D array of bin centers.
+    - binned_spectra_series: 2D array of averaged power per bin over time.
+    - binned_sem_series: 2D array of Standard Error of the Mean per bin over time.
+    """
+    min_points = 3
+    epsilon = 1e-10
+    
+    # If bin_width is not provided, estimate a good default (1 cycle per box width)
+    # This assumes the minimum non-zero frequency step in f_array is roughly the bin_width
+    if bin_width is None:
+        bin_width = np.min(f_array[f_array > 0])
+    
+    # 1. Determine bin indices for each point in the raw f_array
+    f_binned = np.floor(f_array / bin_width).astype(int)
+    max_bin = np.max(f_binned)
+    
+    # 2. Count the number of points that fall into each bin
+    # We use minlength to ensure arrays remain aligned up to max_bin
+    nr = np.bincount(f_binned, minlength=max_bin + 1)
+    
+    valid_bins = nr > 0
+    enough_points = nr >= min_points
+    
+    # 3. Create the binned frequency axis (using bin centers)
+    binned_f = (np.arange(max_bin + 1) + 0.5) * bin_width
+    
+    # Pre-allocate output lists
+    binned_spectra_series = []
+    binned_sem_series = []
+    
+    # 4. Iterate over each frame and bin the power data
+    for spectrum in spectra_series:
+        # Sum of power per bin
+        tbin = np.bincount(f_binned, weights=spectrum, minlength=max_bin + 1)
+        radial_profile = np.zeros(max_bin + 1, dtype=np.float64)
+        radial_profile[valid_bins] = tbin[valid_bins] / nr[valid_bins]
+        
+        # Sum of squared power per bin (for variance calculation)
+        tbin_sq = np.bincount(f_binned, weights=spectrum**2, minlength=max_bin + 1)
+        mean_sq_power = np.zeros(max_bin + 1, dtype=np.float64)
+        mean_sq_power[valid_bins] = tbin_sq[valid_bins] / nr[valid_bins]
+        
+        # Calculate Variance and SEM
+        variance = np.maximum(mean_sq_power - radial_profile**2, 0)
+        sem = np.zeros(max_bin + 1, dtype=np.float64)
+        
+        sem[enough_points] = np.sqrt(variance[enough_points]) / np.sqrt(nr[enough_points]) + epsilon
+        sem[~enough_points] = np.inf  # Mark bins with insufficient points
+        
+        binned_spectra_series.append(radial_profile)
+        binned_sem_series.append(sem)
+        
+    return binned_f, np.array(binned_spectra_series), np.array(binned_sem_series)
+
+#Fitting
 def gaussian_model(B, x):
-    """Gaussian peak: B[0]=Amplitude, B[1]=Mean(k_max), B[2]=StdDev, B[3]=Offset"""
+    """Gaussian peak: B[0]=Amplitude, B[1]=Mean(f_max), B[2]=StdDev, B[3]=Offset"""
     return B[0] * np.exp(-((x - B[1])**2) / (2 * B[2]**2)) + B[3]
 
-def extract_k_max_odr(k_array, power, sem, window=4, plot_fit=True):
-    from scipy.optimize import curve_fit
+def extract_f_max_unbinned_mle(f_array, p_raw, window_center, window_radius, plot_fit=True):
+    """
+    Fits the theoretical Gaussian directly to the raw, unbinned Fourier pixels.
+    """
+    # 1. Isolate the raw pixels falling within our fitting window
+    # We ignore the zero-frequency (DC) component by enforcing f >= 1e-5
+    mask = (f_array >= max(1e-5, window_center - window_radius)) & (f_array <= (window_center + window_radius))
     
-    # Determine bin width to calculate correct discretization errors
-    bin_width = k_array[1] - k_array[0]
+    f_fit = f_array[mask]
+    p_fit = p_raw[mask]
     
-    # Nyquist limit physically occurs at half the grid size.
-    nyquist_idx = len(k_array) // 2 
-    
-    valid_power = power[1:nyquist_idx]
-    k_vals = k_array[1:nyquist_idx]
-    sem_vals = sem[1:nyquist_idx]
-    
-    discrete_idx = np.argmax(valid_power)
-    
-    start = max(0, discrete_idx - window)
-    end = min(len(valid_power), discrete_idx + window + 1)
-    
-    k_fit = k_vals[start:end]
-    p_fit = valid_power[start:end]
-    p_err = sem_vals[start:end]
-    
-    finite_mask = ~np.isinf(p_err)
-    k_fit = k_fit[finite_mask]
-    p_fit = p_fit[finite_mask]
-    p_err = p_err[finite_mask]
-    
-    if len(k_fit) < 4:
-        print("Warning: Not enough finite data points in the window to fit a Gaussian.")
-        return float(k_vals[discrete_idx]), bin_width / 2
+    if len(f_fit) < 10:
+        print("Warning: Not enough unbinned pixels in window to run MLE.")
+        return window_center, 0.0
 
-    # --- Y-AXIS SCALING ---
-    y_scale = np.max(p_fit)
-    p_fit_scaled = p_fit / y_scale
-    
-    p_err_scaled = p_err / y_scale
-    p_err_scaled = np.maximum(p_err_scaled, 0.01) 
-
-    k_err = np.full_like(k_fit, bin_width / 2, dtype=np.float64)
-    
-    model = odr.Model(gaussian_model)
-    data = odr.RealData(k_fit, p_fit_scaled, sx=k_err, sy=p_err_scaled)
-    
-    # Dynamic initial guesses
-    amp_guess = 1.0 - np.min(p_fit_scaled)
-    mean_guess = k_vals[discrete_idx]
-    stddev_guess = bin_width * 1.5 
-    offset_guess = np.min(p_fit_scaled)
-    
-    B0 = [amp_guess, mean_guess, stddev_guess, offset_guess]
-    
-    myodr = odr.ODR(data, model, beta0=B0)
-    output = myodr.run()
-    
-    k_max_continuous = output.beta[1]
-    k_max_error = output.sd_beta[1]
-    
-    # --- FIX 2: Automatic Fallback for Sharp Peaks ---
-    if k_max_error == 0.0 or 'Problem is not full rank' in output.stopreason[0]:
-        print("\n[!] ODR Failed (Peak too sharp/irregular). Falling back to standard curve_fit...")
+    # 2. The True Unbinned Negative Log-Likelihood Function (Exponential Distribution)
+    def nll_unbinned(params):
+        amp, mean, stddev, offset = params
         
-        # Wrapper to translate between curve_fit format and ODR format
-        def curve_fit_gaussian(x, amp, mean, stddev, offset):
-            return gaussian_model([amp, mean, stddev, offset], x)
+        # Enforce physical constraints
+        if amp <= 0 or stddev <= 0 or offset <= 0:
+            return np.inf
             
-        try:
-            popt, pcov = curve_fit(
-                curve_fit_gaussian, k_fit, p_fit_scaled, p0=B0, 
-                sigma=p_err_scaled, absolute_sigma=True, maxfev=5000
-            )
-            # Create a mock output.beta array so the plotting code still works
-            output.beta = popt
-            k_max_continuous = popt[1]
-            k_max_error = np.sqrt(pcov[1, 1])
-            print("-> curve_fit succeeded.")
-        except RuntimeError:
-            print("-> curve_fit also failed. Resorting to discrete bin maximum.")
-            output.beta = B0
-            k_max_continuous = mean_guess
-            k_max_error = bin_width / 2
-
-    # Re-scale the amplitude and offset back to original magnitude for plotting
-    output.beta[0] *= y_scale
-    output.beta[3] *= y_scale
-    
-    print("\n" + "="*50)
-    print(" RIGOROUS k_max EXTRACTION")
-    print("="*50)
-    print(f"Discrete Peak      : k = {k_vals[discrete_idx]}")
-    print(f"Continuous Peak    : k_max = {k_max_continuous:.3f} ± {k_max_error:.3f}")
-    
-    if k_max_continuous <= 0 or k_max_continuous >= k_array[nyquist_idx]:
-        print("Warning: Fit failed to converge on a physical peak inside the domain.")
+        # S evaluates the theoretical Gaussian curve at the EXACT float distance of every pixel
+        S = gaussian_model(params, f_fit)
         
+        # Exact Exponential Log-Likelihood (no N_i or binning needed)
+        return np.sum(np.log(S) + (p_fit / S))
+
+    # 3. Dynamic initial guesses based on the raw pixels in the window
+    amp_guess = np.max(p_fit) - np.min(p_fit)
+    mean_guess = window_center
+    stddev_guess = window_radius / 2.0
+    offset_guess = np.maximum(np.min(p_fit), 1e-5)
+    
+    initial_guess = [amp_guess, mean_guess, stddev_guess, offset_guess]
+    
+    # 4. Optimizer Bounds
+    bounds = [
+        (1e-5, np.inf),             # Amplitude > 0
+        (f_fit.min(), f_fit.max()), # Mean bounded strictly within fit window
+        (1e-5, np.inf),             # StdDev > 0
+        (1e-5, np.inf)              # Offset > 0
+    ]
+    
+    # Run the MLE Optimizer
+    result = minimize(nll_unbinned, initial_guess, bounds=bounds, method='L-BFGS-B')
+    
+    if result.success:
+        f_max_continuous = result.x[1]
+        cov_matrix = result.hess_inv(np.eye(4)) # Extract inverse Hessian for rigorous errors
+        f_max_error = np.sqrt(cov_matrix[1, 1])
+        print("-> Unbinned MLE Optimization Succeeded.")
+    else:
+        print("\n[!] Unbinned MLE Failed to converge. Resorting to discrete guess.")
+        result.x = initial_guess
+        f_max_continuous = mean_guess
+        f_max_error = 0.0
+
+    print("\n" + "="*50)
+    print(" TRUE UNBINNED MLE f_max EXTRACTION")
+    print("="*50)
+    print(f"Window Center Guess : f = {window_center:.4f}")
+    print(f"Continuous Peak     : f_max = {f_max_continuous:.4f} ± {f_max_error:.4f}")
     print("="*50 + "\n")
 
     if plot_fit:
         plt.figure(figsize=(8, 5))
         
-        sem_plot = np.where(np.isinf(sem_vals), np.nan, sem_vals)
-        
-        plt.errorbar(k_vals, valid_power, yerr=sem_plot, fmt='o', 
-                     color='lightgray', ecolor='lightgray', elinewidth=1, capsize=2, 
-                     label='Data outside fit window')
-        
-        plt.errorbar(k_fit, p_fit, yerr=p_err, xerr=k_err, fmt='o', 
-                     color='dodgerblue', ecolor='dodgerblue', elinewidth=1.5, capsize=3, 
-                     label='Data used in fit')
+        # Plot the raw, unbinned pixels!
+        plt.scatter(f_fit, p_fit, color='dodgerblue', s=5, alpha=0.3, label='Raw Unbinned Pixels')
                      
-        x_smooth = np.linspace(k_fit.min() - (bin_width * 3), k_fit.max() + (bin_width * 3), 200)
-        y_smooth = gaussian_model(output.beta, x_smooth)
+        x_smooth = np.linspace(f_fit.min(), f_fit.max(), 200)
+        y_smooth = gaussian_model(result.x, x_smooth)
         
         plt.plot(x_smooth, y_smooth, color='crimson', lw=2.5, 
-                 label=f'Gaussian Fit\n$k_{{max}} = {k_max_continuous:.2f} \pm {k_max_error:.2f}$')
+                 label=f'MLE Gaussian Fit\n$f_{{max}} = {f_max_continuous:.4f} \pm {f_max_error:.4f}$')
         
-        plt.axvline(k_max_continuous, color='crimson', linestyle='--', alpha=0.6)
+        plt.axvline(f_max_continuous, color='crimson', linestyle='--', alpha=1.0)
         
-        plt.title('Gaussian Fit of Power Spectrum Peak (Best Frame)')
-        plt.xlabel('Scalar Wavenumber (k)')
-        plt.ylabel('Averaged Power')
+        plt.title('True Unbinned Maximum Likelihood Fit')
+        plt.xlabel('Spatial Frequency $f$ ($1/\lambda$)')
+        plt.ylabel('Power (Raw pixels)')
         
-        window_width = window * bin_width
-        plt.xlim(max(k_array[1], k_vals[discrete_idx] - window_width - 3), 
-                 min(k_array[nyquist_idx], k_vals[discrete_idx] + window_width + 3))
-                 
-        plt.ylim(0, np.max(p_fit) * 1.3)
+        plt.ylim(0, np.max(p_fit) * 1.1)
         plt.grid(True, linestyle='--', alpha=0.5)
         plt.legend(loc='upper right')
         plt.tight_layout()
         plt.show()
     
-    return k_max_continuous, k_max_error#Visualisation
-
+    return f_max_continuous, f_max_error
 
 #Visualisation
 def plot_max_density(max_density_series, dt, step_skip, rho_0=None):
@@ -265,7 +258,7 @@ def plot_max_density(max_density_series, dt, step_skip, rho_0=None):
     plt.show()
 
 
-def animate_combined(k_array, smoothed_stack, cell_stack, spectra_series, sem_series, dt, step_skip, interval):
+def animate_combined(f_array, smoothed_stack, cell_stack, spectra_series, sem_series, dt, step_skip, interval):
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
     smooth_vmin, smooth_vmax = smoothed_stack.min(), smoothed_stack.max()
@@ -289,18 +282,17 @@ def animate_combined(k_array, smoothed_stack, cell_stack, spectra_series, sem_se
     num_bins = spectra_series.shape[1]
     global_max = np.max(spectra_series[:, 1:])
     
-    nyquist_idx = len(k_array) // 2
 
-    # Scale X axis limits using the actual k_array bounds
-    ax3.set_xlim(k_array[1], k_array[nyquist_idx])
+    # Scale X axis limits using the actual f_array bounds
+    ax3.set_xlim(f_array[1], f_array[-1])
     ax3.set_ylim(0, global_max * 1.3)
     ax3.set_title("Evolution of Power Spectrum", fontsize=13)
-    ax3.set_xlabel("Scalar Wavenumber (k)")
+    ax3.set_xlabel("Spatial Frequency $f$ ($1/\lambda$)")
     ax3.set_ylabel("Averaged Power")
     ax3.grid(True, linestyle="--", alpha=0.6)
 
     line, caplines, barlinecols = ax3.errorbar(
-        k_array, np.zeros(num_bins), yerr=np.zeros(num_bins), 
+        f_array, np.zeros(num_bins), yerr=np.zeros(num_bins), 
         fmt='-', lw=2.5, color="dodgerblue", elinewidth=1.5, alpha=0.8
     )
     error_lines = barlinecols[0] 
@@ -317,7 +309,7 @@ def animate_combined(k_array, smoothed_stack, cell_stack, spectra_series, sem_se
         img_cell.set_data(cell_stack[0])
         line.set_data([], [])
         
-        empty_segments = [np.array([[x, 0], [x, 0]]) for x in k_array]
+        empty_segments = [np.array([[x, 0], [x, 0]]) for x in f_array]
         error_lines.set_segments(empty_segments)
         
         time_text.set_text("")
@@ -332,10 +324,10 @@ def animate_combined(k_array, smoothed_stack, cell_stack, spectra_series, sem_se
         
         err[np.isinf(err)] = np.nan
         
-        # Plot against k_array
-        line.set_data(k_array, y)
+        # Plot against f_array
+        line.set_data(f_array, y)
         
-        segments = [np.array([[x, y_val - e], [x, y_val + e]]) for x, y_val, e in zip(k_array, y, err)]
+        segments = [np.array([[x, y_val - e], [x, y_val + e]]) for x, y_val, e in zip(f_array, y, err)]
         error_lines.set_segments(segments)
         
         time_text.set_text(f"Time: {frame * step_skip * dt:.2f}")
@@ -347,13 +339,11 @@ def animate_combined(k_array, smoothed_stack, cell_stack, spectra_series, sem_se
     )
 
     return ani
-
-
 # ==========================================
 # GLOBAL EXECUTION 
 # ==========================================
-
-config, cell_raw = load_data()
+FOLDER_NAME = "sim6"
+config, cell_raw = load_data(FOLDER_NAME)
 
 width = config["width"]
 height = config["height"]
@@ -367,11 +357,36 @@ SAVE_VIDEO = False
 
 cell_stack = cell_raw.reshape(-1, height, width)[::step_skip]
 smoothed_stack = get_smoothed_cell_stack(cell_stack, method='box', size=3)
-
-# Threading the k_array out of the series function
-k_array, spectra_series, sem_series = get_power_spectra_series(cell_stack, bin_width=1)
-
 max_density_series = get_max_density_series(smoothed_stack)
+# Threading the k_array out of the series function
+f_array, spectra_series = get_power_spectra_series(cell_stack)
+
+binned_f, binned_spectra, binned_sem = bin_spectra_series(
+    f_array, 
+    spectra_series, 
+    bin_width=(1.0 / width) 
+)
+
+# 3. Animate using the binned arrays
+ani = animate_combined(
+    f_array=binned_f, 
+    smoothed_stack=smoothed_stack, 
+    cell_stack=cell_stack, 
+    spectra_series=binned_spectra, 
+    sem_series=binned_sem, 
+    dt=dt, 
+    step_skip=step_skip, 
+    interval=100
+)
+
+if SAVE_VIDEO:
+    print("Saving video... This might take a minute.")
+    ani.save("simulation_evolution.mp4", writer="ffmpeg", fps=30, dpi=200)
+    print("Video saved successfully as simulation_evolution.mp4!")
+else:
+    print("Playing animation interactively...")
+    plt.show()
+
 
 # --- FIND THE BEST FRAME ---
 threshold = mean_cell_density * 1.1
@@ -385,23 +400,26 @@ else:
     
 print(f"\nBest Linear Frame Identified: Index {best_frame_idx} (Time: {best_frame_idx * step_skip * dt:.3f})")
 
-# --- EXTRACT k_max WITH ERROR ---
-best_power = spectra_series[best_frame_idx]
-best_sem = sem_series[best_frame_idx]
+# Extract the unbinned data for the best frame
+best_power_unbinned = spectra_series[best_frame_idx]
 
-# Pass the k_array into the extraction logic
-k_max, k_error = extract_k_max_odr(k_array, best_power, best_sem, window=6)
+# 1. Use the binned array to find a smart initial guess for the peak center
+bin_width = 1.0 / width
+nyquist_idx = len(binned_f) // 2
+valid_binned_power = binned_spectra[best_frame_idx][1:nyquist_idx]
+
+# Find the center of the highest bin
+discrete_peak_idx = np.argmax(valid_binned_power) + 1 
+window_center = binned_f[discrete_peak_idx]
+
+# 2. Run the TRUE UNBINNED MLE on the raw pixels in a window around that center
+f_max, f_error = extract_f_max_unbinned_mle(
+    f_array=f_array, 
+    p_raw=best_power_unbinned, 
+    window_center=window_center, 
+    window_radius=(bin_width * 4) # Look 4 bins in both directions
+)
 
 # Visualisation 
 plot_max_density(max_density_series, dt, step_skip, mean_cell_density)
 
-# Pass the k_array into the animation function
-ani = animate_combined(k_array, smoothed_stack, cell_stack, spectra_series, sem_series, dt, step_skip, interval=50)
-
-if SAVE_VIDEO:
-    print("Saving video... This might take a minute.")
-    ani.save("simulation_evolution.mp4", writer="ffmpeg", fps=30, dpi=200)
-    print("Video saved successfully as simulation_evolution.mp4!")
-else:
-    print("Playing animation interactively...")
-    plt.show()

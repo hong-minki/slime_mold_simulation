@@ -23,7 +23,8 @@ SimConfig load_config_from_json(const std::string& filename) {
 
     // Helper lambdas to extract values using regex
     auto extract_double = [&](const std::string& key) {
-        std::regex r("\"" + key + "\"\\s*:\\s*([-+]?[0-9]*\\.?[0-9]+)");
+        // Added (?:[eE][-+]?[0-9]+)? to support scientific notation like 1e-05
+        std::regex r("\"" + key + "\"\\s*:\\s*([-+]?[0-9]*\\.?[0-9]+(?:[eE][-+]?[0-9]+)?)");
         std::smatch match;
         if (std::regex_search(content, match, r)) return std::stod(match[1].str());
         return 0.0;
