@@ -15,7 +15,7 @@ plt.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
 
 def load_data(folder_name):
     script_dir = Path(__file__).resolve().parent
-    warehouse_path = (script_dir / ".." / "results" / folder_name).resolve()
+    warehouse_path = (script_dir / ".." / ".." /"results" / folder_name).resolve()
     
     config_path = warehouse_path / "sim_config.json"
     with open(config_path, "r") as f:
@@ -198,6 +198,7 @@ def extract_f_max_unbinned_mle(f_array, p_raw, window_center, window_radius):
         cov_matrix = result.hess_inv(np.eye(4)) 
         f_max_error = np.sqrt(cov_matrix[1, 1])
         print("-> Unbinned MLE Optimization Succeeded.")
+        print(f"f_max = {f_max_continuous} pm {f_max_error}")
         return f_max_continuous, f_max_error, result.x
     else:
         print("\n[!] Unbinned MLE Failed to converge. Resorting to discrete guess.")
@@ -361,7 +362,7 @@ def plot_mle_overlap(f_raw, p_raw, f_binned, p_binned, p_err_binned, popt, f_max
 # ==========================================
 # GLOBAL EXECUTION 
 # ==========================================
-FOLDER_NAME = "sim7"
+FOLDER_NAME = "Simulation_Dchem_58.67"
 config, cell_raw = load_data(FOLDER_NAME)
 
 width = config["width"]
@@ -381,7 +382,7 @@ max_density_series = get_max_density_series(smoothed_stack)
 # Threading the f_array out of the series function
 f_array, spectra_series = get_power_spectra_series(cell_stack)
 
-bin_width = 1.0 / width
+bin_width = 1 / width
 binned_f, binned_spectra, binned_sem = bin_spectra_series(
     f_array, 
     spectra_series, 

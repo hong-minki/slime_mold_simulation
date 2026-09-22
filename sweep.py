@@ -8,12 +8,12 @@ import numpy as np
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 base_dir = os.path.join(SCRIPT_DIR, "out", "build", "x64-Debug")
-results_dir = os.path.join(SCRIPT_DIR, "results")
+results_dir = os.path.join(SCRIPT_DIR, "../", "results")
 exe_name = "slime_mold_simulation.exe"
 config_name = "sim_config.json"
 
-num_points = 10
-diffusion_rates = np.linspace(16, 64, num_points)
+num_points = 8
+diffusion_rates = np.linspace(26.67, 64, num_points)
 
 def run_sweep():
     os.makedirs(results_dir, exist_ok=True)
@@ -33,7 +33,7 @@ def run_sweep():
         "dx": 1.0, 
         "width": 32, 
         "height": 32, 
-        "diffusion_rate": 64, 
+        "diffusion_rate": 16, 
         "decay_rate": 0.1, 
         "chem_secretion_rate": 1.0, 
         "total_cells": 10240000, # LOWER THIS FOR TESTING IF NEEDED
