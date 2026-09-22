@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+# --- TOGGLE FOR DISCRETE MODEL ANALYSIS ---
+INCLUDE_DISCRETE_MODEL = False  # Set to False to exclude the discrete model
+# ------------------------------------------
+
 # 1. Load data from CSV
 df = pd.read_csv('cluster_separation_data.csv')
 
@@ -53,7 +57,6 @@ def discrete_model(d_chem, dx_val=dx):
 
 # Values at experimental data points
 lambda_theo_cont = continuous_model(D_chem)
-lambda_theo_disc = discrete_model(D_chem)
 
 # 4. Reduced Chi-Squared Analysis (Degrees of freedom = N, p = 0)
 dof = len(lambda_max_exp)
@@ -61,20 +64,21 @@ dof = len(lambda_max_exp)
 chi2_cont = np.sum(((lambda_max_exp - lambda_theo_cont) / lambda_max_err) ** 2)
 red_chi2_cont = chi2_cont / dof
 
-chi2_disc = np.sum(((lambda_max_exp - lambda_theo_disc) / lambda_max_err) ** 2)
-red_chi2_disc = chi2_disc / dof
-
 print("--- Goodness-of-Fit Comparison ---")
 print(f"Degrees of freedom (N): {dof}")
 print(f"Continuous Model: Chi^2 = {chi2_cont:.4f}, Reduced Chi^2 = {red_chi2_cont:.4f}")
-print(f"Discrete Model:   Chi^2 = {chi2_disc:.4f}, Reduced Chi^2 = {red_chi2_disc:.4f}")
+
+if INCLUDE_DISCRETE_MODEL:
+    lambda_theo_disc = discrete_model(D_chem)
+    chi2_disc = np.sum(((lambda_max_exp - lambda_theo_disc) / lambda_max_err) ** 2)
+    red_chi2_disc = chi2_disc / dof
+    print(f"Discrete Model:   Chi^2 = {chi2_disc:.4f}, Reduced Chi^2 = {red_chi2_disc:.4f}")
 
 # 5. Curve generation for plotting
 sqrt_D_smooth = np.linspace(min(sqrt_D_chem), max(sqrt_D_chem), 300)
 D_chem_smooth = sqrt_D_smooth ** 2
 
 lambda_smooth_cont = continuous_model(D_chem_smooth)
-lambda_smooth_disc = discrete_model(D_chem_smooth)
 
 # 6. Visualization
 plt.figure(figsize=(10, 6))
@@ -102,16 +106,21 @@ plt.plot(
     label=f'Continuous Theory ($\\chi^2_\\nu = {red_chi2_cont:.2f}$)'
 )
 
-# Discrete lattice-corrected model
-plt.plot(
-    sqrt_D_smooth, 
-    lambda_smooth_disc, 
-    'g-', 
-    linewidth=2, 
-    label=f'Discrete Lattice Theory ($\\chi^2_\\nu = {red_chi2_disc:.2f}$)'
-)
+# Discrete lattice-corrected model (conditional)
+if INCLUDE_DISCRETE_MODEL:
+    lambda_smooth_disc = discrete_model(D_chem_smooth)
+    plt.plot(
+        sqrt_D_smooth, 
+        lambda_smooth_disc, 
+        'g-', 
+        linewidth=2, 
+        label=f'Discrete Lattice Theory ($\\chi^2_\\nu = {red_chi2_disc:.2f}$)'
+    )
 
-plt.title(r'Cluster Separation: $\lambda_{max}$ vs. $\sqrt{D_{chem}}$ (Continuous vs. Discrete Grid)')
+title_str = r'Cluster Separation: $\lambda_{max}$ vs. $\sqrt{D_{chem}}$'
+if INCLUDE_DISCRETE_MODEL:
+    title_str += ' (Continuous vs. Discrete Grid)'
+plt.title(title_str)
 plt.xlabel(r'$\sqrt{D_{chem}}\quad (\mathrm{Diffusion\ Rate}^{1/2})$')
 plt.ylabel(r'$\lambda_{max}\quad (\mathrm{Cluster\ Separation})$')
 plt.grid(True, alpha=0.3)
@@ -120,10 +129,14 @@ plt.legend(loc='lower right', framealpha=0.9)
 # Summary statistics text box
 stats_text = (
     f"Continuous Model:\n"
-    f"  $\\chi^2_\\nu = {red_chi2_cont:.2f}$\n"
-    f"Discrete Model:\n"
-    f"  $\\chi^2_\\nu = {red_chi2_disc:.2f}$"
+    f"  $\\chi^2_\\nu = {red_chi2_cont:.2f}$"
 )
+if INCLUDE_DISCRETE_MODEL:
+    stats_text += (
+        f"\nDiscrete Model:\n"
+        f"  $\\chi^2_\\nu = {red_chi2_disc:.2f}$"
+    )
+
 props = dict(boxstyle='round', facecolor='white', alpha=0.85, edgecolor='gray')
 plt.gca().text(
     0.05, 0.95, 

@@ -145,21 +145,22 @@ def gaussian_model(B, x):
     """Gaussian peak: B[0]=Amplitude, B[1]=Mean(f_max), B[2]=StdDev, B[3]=Offset"""
     return B[0] * np.exp(-((x - B[1])**2) / (2 * B[2]**2)) + B[3]
 
-def extract_f_max_unbinned_mle(f_array, p_raw, window_center, window_radius):
+def extract_f_max_unbinned_mle(f_array, p_raw, window_center, window_radius_left, window_radius_right):
     """
     Fits the theoretical Gaussian directly to the raw, unbinned Fourier pixels
-    using a normalized Exponential Maximum Likelihood scale.
+    using a normalized Exponential Maximum Likelihood scale with an asymmetric window.
     """
-    mask = (f_array >= max(1e-5, window_center - window_radius)) & (f_array <= (window_center + window_radius))
+    # Updated to use distinct left and right radius parameters
+    mask = (f_array >= max(1e-5, window_center - window_radius_left)) & (f_array <= (window_center + window_radius_right))
     
     f_fit = f_array[mask]
     p_fit = p_raw[mask]
-    
+    print(f"total number of data is {len(f_fit)}")
     if len(f_fit) < 10:
         print("Warning: Not enough unbinned pixels in window to run MLE.")
         return window_center, 0.0, None
 
-    # THE FIX: Normalize the power array so the optimizer doesn't choke on 10^10 scale values
+    # Normalize the power array so the optimizer doesn't choke on 10^10 scale values
     p_scale = np.mean(p_fit)
     p_norm = p_fit / p_scale
 
@@ -174,7 +175,8 @@ def extract_f_max_unbinned_mle(f_array, p_raw, window_center, window_radius):
     # Initial guesses scaled to the normalized data (values around ~1.0)
     amp_guess = 2.0  
     mean_guess = window_center
-    stddev_guess = window_radius / 2.0
+    # Update standard deviation guess to be the average of the two radii
+    stddev_guess = (window_radius_left + window_radius_right) / 4.0 
     offset_guess = 0.5 
     
     initial_guess = [amp_guess, mean_guess, stddev_guess, offset_guess]
@@ -206,7 +208,6 @@ def extract_f_max_unbinned_mle(f_array, p_raw, window_center, window_radius):
         initial_guess[0] *= p_scale
         initial_guess[3] *= p_scale
         return mean_guess, 0.0, initial_guess
-    
 #Visualisation
 def plot_max_density(max_density_series, dt, step_skip, rho_0=None):
     time_steps = np.arange(len(max_density_series)) * dt
@@ -309,17 +310,17 @@ def animate_combined(f_array, smoothed_stack, cell_stack, spectra_series, sem_se
 
     return ani
 
-def plot_mle_overlap(f_raw, p_raw, f_binned, p_binned, p_err_binned, popt, f_max, f_max_error, window_center, window_radius):
+def plot_mle_overlap(f_raw, p_raw, f_binned, p_binned, p_err_binned, popt, f_max, f_max_error, window_center, window_radius_left, window_radius_right):
     """
     Plots the raw unbinned pixels, the binned empirical data with error bars,
-    and the theoretical MLE Gaussian fit.
+    and the theoretical MLE Gaussian fit using an asymmetric window.
     """
     if popt is None:
         print("No valid fit parameters provided to plot.")
         return
 
-    # Isolate the exact window used for the fit
-    mask_raw = (f_raw >= max(1e-5, window_center - window_radius)) & (f_raw <= (window_center + window_radius))
+    # Isolate the exact window used for the fit with the new left/right parameters
+    mask_raw = (f_raw >= max(1e-5, window_center - window_radius_left)) & (f_raw <= (window_center + window_radius_right))
     f_fit = f_raw[mask_raw]
     p_fit = p_raw[mask_raw]
     
@@ -359,10 +360,11 @@ def plot_mle_overlap(f_raw, p_raw, f_binned, p_binned, p_err_binned, popt, f_max
     plt.legend(loc='upper right')
     plt.tight_layout()
     plt.show()
+    
 # ==========================================
 # GLOBAL EXECUTION 
 # ==========================================
-FOLDER_NAME = "Simulation_Dchem_58.67"
+FOLDER_NAME = "Simulation_Dchem_16.0"
 config, cell_raw = load_data(FOLDER_NAME)
 
 width = config["width"]
@@ -377,7 +379,7 @@ SAVE_VIDEO = False
 
 cell_stack = cell_raw.reshape(-1, height, width)[::step_skip]
 smoothed_stack = get_smoothed_cell_stack(cell_stack, method='box', size=3)
-max_density_series = get_max_density_series(smoothed_stack)
+max_density_series = get_max_density_series(cell_stack)
 
 # Threading the f_array out of the series function
 f_array, spectra_series = get_power_spectra_series(cell_stack)
@@ -388,26 +390,8 @@ binned_f, binned_spectra, binned_sem = bin_spectra_series(
     spectra_series, 
     bin_width=bin_width 
 )
-
-# 1. Animate using the binned arrays
-ani = animate_combined(
-    f_array=binned_f, 
-    smoothed_stack=smoothed_stack, 
-    cell_stack=cell_stack, 
-    spectra_series=binned_spectra, 
-    sem_series=binned_sem, 
-    dt=dt, 
-    step_skip=step_skip, 
-    interval=100
-)
-
-if SAVE_VIDEO:
-    print("Saving video... This might take a minute.")
-    ani.save("simulation_evolution.mp4", writer="ffmpeg", fps=30, dpi=200)
-    print("Video saved successfully as simulation_evolution.mp4!")
-else:
-    print("Playing animation interactively...")
-    plt.show()
+window_radius_left = bin_width * 5
+window_radius_right = bin_width * 5
 
 # --- FIND THE BEST FRAME ---
 threshold = mean_cell_density * 1.1
@@ -434,15 +418,15 @@ valid_binned_power = best_power_binned[valid_mask]
 
 discrete_peak_idx = np.argmax(valid_binned_power)
 window_center = valid_binned_f[discrete_peak_idx]
-window_radius = bin_width * 5
+
 
 # 3. Run the TRUE UNBINNED MLE on the raw pixels in a window around that center
-# (Now capturing all 3 return variables)
 f_max, f_error, popt = extract_f_max_unbinned_mle(
     f_array=f_array, 
     p_raw=best_power_unbinned, 
     window_center=window_center, 
-    window_radius=window_radius 
+    window_radius_left=window_radius_left,
+    window_radius_right=window_radius_right
 )
 
 # 4. Visualisation of the MLE overlap
@@ -456,9 +440,35 @@ plot_mle_overlap(
     f_max=f_max,
     f_max_error=f_error,
     window_center=window_center,
-    window_radius=window_radius
+    window_radius_left=window_radius_left,
+    window_radius_right=window_radius_right
 )
 
 # 5. Visualisation of the max density evolution
 plot_max_density(max_density_series, dt, step_skip, mean_cell_density)
 
+linear_binned_f = binned_f[:best_frame_idx]
+linear_smoothed_stack = smoothed_stack[:best_frame_idx]
+linear_cell_stack = cell_stack[:best_frame_idx]
+linear_binned_spectra = binned_spectra[:best_frame_idx]
+linear_binned_sem = binned_sem[:best_frame_idx]
+
+# 1. Animate using the binned arrays
+ani = animate_combined(
+    f_array=linear_binned_f, 
+    smoothed_stack=linear_smoothed_stack, 
+    cell_stack=linear_cell_stack, 
+    spectra_series=linear_binned_spectra, 
+    sem_series=linear_binned_sem, 
+    dt=dt, 
+    step_skip=step_skip, 
+    interval=100
+)
+
+if SAVE_VIDEO:
+    print("Saving video... This might take a minute.")
+    ani.save("simulation_evolution.mp4", writer="ffmpeg", fps=30, dpi=200)
+    print("Video saved successfully as simulation_evolution.mp4!")
+else:
+    print("Playing animation interactively...")
+    plt.show()
