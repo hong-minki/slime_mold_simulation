@@ -69,7 +69,7 @@ int main()
 
     class world_setup world(my_config, rng);
     std::vector<double_vector2d> cells_coordinates{ world.random_cell_distribution() };
-    std::vector<double> chem_conc_field{ world.chem_conc_field_initialisation_empty() };
+    std::vector<double> chem_conc_field{ world.chem_conc_field_initialisation_steady_state() };
 
     class simulation sim(my_config, rng, cells_coordinates, chem_conc_field);
     sim.run_simulation();
