@@ -6,23 +6,20 @@ import imageio_ffmpeg
 import json
 import scipy.ndimage as ndi
 from scipy.optimize import minimize
-
+import glob
 
 #run this first for animation %matplotlib qt
 
 # Map the ffmpeg executable for saving videos
 plt.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
 
-def load_data(folder_name):
-    script_dir = Path(__file__).resolve().parent
-    warehouse_path = (script_dir / ".." / ".." /"results" / folder_name).resolve()
-    
-    config_path = warehouse_path / "sim_config.json"
+def load_data(folder_path):
+    """Modified to take a Path object directly"""
+    config_path = folder_path / "sim_config.json"
     with open(config_path, "r") as f:
         config = json.load(f)
         
-    cell_raw = np.fromfile(warehouse_path / "cell_history.bin", dtype=np.int32)
-    
+    cell_raw = np.fromfile(folder_path / "cell_history.bin", dtype=np.int32)
     return config, cell_raw
 
 def get_smoothed_cell_stack(cell_stack, method='box', size=3):
@@ -193,14 +190,38 @@ def extract_f_max_unbinned_mle(f_array, p_raw, window_center, window_radius_left
     if result.success:
         f_max_continuous = result.x[1]
         
-        # Rescale the Amplitude and Offset back to physical 10^10 units for plotting
+        # --- CALCULATE TRUE STATISTICAL ERROR (Fisher Information) ---
+        amp, mean, std, offset = result.x
+        S_opt = gaussian_model(result.x, f_fit)
+        
+        # Partial derivatives of the model with respect to each parameter
+        exp_term = np.exp(-((f_fit - mean)**2) / (2 * std**2))
+        
+        dS_dA = exp_term
+        dS_dmean = amp * exp_term * (f_fit - mean) / (std**2)
+        dS_dstd = amp * exp_term * ((f_fit - mean)**2) / (std**3)
+        dS_doffset = np.ones_like(f_fit)
+        
+        # Jacobian matrix (N_points x 4_parameters)
+        J = np.column_stack([dS_dA, dS_dmean, dS_dstd, dS_doffset])
+        
+        W = 1.0 / (S_opt**2)
+        FIM = J.T @ (W[:, None] * J)
+        
+        # True Covariance Matrix is the inverse of Fisher Info
+        try:
+            true_cov = np.linalg.inv(FIM)
+            f_max_error = np.sqrt(true_cov[1, 1])
+        except np.linalg.LinAlgError:
+            print("Warning: Fisher Matrix singular, falling back to 0 error.")
+            f_max_error = 0.0
+            
+        # Rescale the Amplitude and Offset back to physical units for plotting
         result.x[0] *= p_scale 
         result.x[3] *= p_scale 
         
-        cov_matrix = result.hess_inv(np.eye(4)) 
-        f_max_error = np.sqrt(cov_matrix[1, 1])
         print("-> Unbinned MLE Optimization Succeeded.")
-        print(f"f_max = {f_max_continuous} pm {f_max_error}")
+        print(f"f_max = {f_max_continuous:.5f} ± {f_max_error:.5f}")
         return f_max_continuous, f_max_error, result.x
     else:
         print("\n[!] Unbinned MLE Failed to converge. Resorting to discrete guess.")
@@ -364,54 +385,101 @@ def plot_mle_overlap(f_raw, p_raw, f_binned, p_binned, p_err_binned, popt, f_max
 # ==========================================
 # GLOBAL EXECUTION 
 # ==========================================
-FOLDER_NAME = "Simulation_Dchem_16.0"
-config, cell_raw = load_data(FOLDER_NAME)
+PATTERN = "Simulation*_Dchem_16.0" 
 
-width = config["width"]
-height = config["height"]
-total_cells = config["total_cells"]
-total_timesteps = config["total_timesteps"]
-dt = config["dt"]
-mean_cell_density = total_cells / (width * height)
+script_dir = Path(__file__).resolve().parent
+results_dir = (script_dir / ".." / ".." / "results").resolve()
+folder_paths = sorted(list(results_dir.glob(PATTERN)))
+
+if not folder_paths:
+    raise ValueError(f"No folders found matching {PATTERN} in {results_dir}")
+
+print(f"Found {len(folder_paths)} simulation(s) for ensemble averaging. Loading data...")
+
+all_max_densities = []
+all_spectra_series = []
+
+rep_cell_stack = None
+rep_smoothed_stack = None
+f_array_single = None
+config = None
 
 step_skip = 10
 SAVE_VIDEO = False
 
-cell_stack = cell_raw.reshape(-1, height, width)[::step_skip]
-smoothed_stack = get_smoothed_cell_stack(cell_stack, method='box', size=3)
-max_density_series = get_max_density_series(cell_stack)
+# 1. Load and process all simulation folders
+for i, folder_path in enumerate(folder_paths):
+    c, cell_raw = load_data(folder_path)
+    
+    if config is None:
+        config = c
+        width = config["width"]
+        height = config["height"]
+        total_cells = config["total_cells"]
+        dt = config["dt"]
+        mean_cell_density = total_cells / (width * height)
+        
+    c_stack = cell_raw.reshape(-1, height, width)[::step_skip]
+    
+    all_max_densities.append(get_max_density_series(c_stack))
+    
+    f_arr, spec_series = get_power_spectra_series(c_stack)
+    all_spectra_series.append(spec_series)
+    
+    if f_array_single is None:
+        f_array_single = f_arr
+        
+    if i == 0:
+        rep_cell_stack = c_stack
+        rep_smoothed_stack = get_smoothed_cell_stack(c_stack, method='box', size=3)
 
-# Threading the f_array out of the series function
-f_array, spectra_series = get_power_spectra_series(cell_stack)
+# --- NEW ALIGNMENT STEP ---
+# Find the shortest simulation length to safely align the time axis
+min_frames = min([len(dens) for dens in all_max_densities])
+print(f"Aligning simulations to minimum common frame count: {min_frames}")
 
+# Crop all time-series lists to min_frames
+all_max_densities = [dens[:min_frames] for dens in all_max_densities]
+all_spectra_series = [spec[:min_frames, :] for spec in all_spectra_series]
+rep_cell_stack = rep_cell_stack[:min_frames]
+rep_smoothed_stack = rep_smoothed_stack[:min_frames]
+
+
+# 2. Combine Ensemble Data Safely
+mean_max_density_series = np.mean(all_max_densities, axis=0)
+
+num_sims = len(folder_paths)
+combined_f_array = np.tile(f_array_single, num_sims)
+
+# Concatenate power spectra side-by-side. 
+combined_spectra_series = np.concatenate(all_spectra_series, axis=1)
+
+print("Binning ensemble power spectra...")
 bin_width = 1 / width
 binned_f, binned_spectra, binned_sem = bin_spectra_series(
-    f_array, 
-    spectra_series, 
+    combined_f_array, 
+    combined_spectra_series, 
     bin_width=bin_width 
 )
-window_radius_left = bin_width * 5
-window_radius_right = bin_width * 5
+window_radius_left = bin_width * 6
+window_radius_right = bin_width * 6
 
-# --- FIND THE BEST FRAME ---
+# --- FIND THE BEST FRAME (Based on Ensemble Mean) ---
 threshold = mean_cell_density * 1.1
-valid_indices = np.where(max_density_series < threshold)[0]
+valid_indices = np.where(mean_max_density_series < threshold)[0]
 
 if len(valid_indices) == 0:
-    print("Warning: Entire simulation exceeded the 10% non-linear threshold.")
+    print("Warning: Entire ensemble simulation exceeded the 10% non-linear threshold.")
     best_frame_idx = 0
 else:
     best_frame_idx = valid_indices[-1]
     
 print(f"\nBest Linear Frame Identified: Index {best_frame_idx} (Time: {best_frame_idx * step_skip * dt:.3f})")
 
-# Extract the unbinned and binned data for the best frame
-best_power_unbinned = spectra_series[best_frame_idx]
+best_power_unbinned = combined_spectra_series[best_frame_idx]
 best_power_binned = binned_spectra[best_frame_idx]
 best_sem_binned = binned_sem[best_frame_idx]
 
-# 2. Find initial guess for the peak center using physically valid frequencies
-# (Applying the 0.5 physical Nyquist limit to avoid the corner artifacts)
 valid_mask = (binned_f > 0) & (binned_f <= 0.5)
 valid_binned_f = binned_f[valid_mask]
 valid_binned_power = best_power_binned[valid_mask]
@@ -419,19 +487,16 @@ valid_binned_power = best_power_binned[valid_mask]
 discrete_peak_idx = np.argmax(valid_binned_power)
 window_center = valid_binned_f[discrete_peak_idx]
 
-
-# 3. Run the TRUE UNBINNED MLE on the raw pixels in a window around that center
 f_max, f_error, popt = extract_f_max_unbinned_mle(
-    f_array=f_array, 
+    f_array=combined_f_array, 
     p_raw=best_power_unbinned, 
     window_center=window_center, 
     window_radius_left=window_radius_left,
     window_radius_right=window_radius_right
 )
 
-# 4. Visualisation of the MLE overlap
 plot_mle_overlap(
-    f_raw=f_array,
+    f_raw=combined_f_array,
     p_raw=best_power_unbinned,
     f_binned=binned_f,
     p_binned=best_power_binned,
@@ -444,18 +509,15 @@ plot_mle_overlap(
     window_radius_right=window_radius_right
 )
 
-# 5. Visualisation of the max density evolution
-plot_max_density(max_density_series, dt, step_skip, mean_cell_density)
+plot_max_density(mean_max_density_series, dt, step_skip, mean_cell_density)
 
-linear_binned_f = binned_f[:best_frame_idx]
-linear_smoothed_stack = smoothed_stack[:best_frame_idx]
-linear_cell_stack = cell_stack[:best_frame_idx]
+linear_smoothed_stack = rep_smoothed_stack[:best_frame_idx]
+linear_cell_stack = rep_cell_stack[:best_frame_idx]
 linear_binned_spectra = binned_spectra[:best_frame_idx]
 linear_binned_sem = binned_sem[:best_frame_idx]
 
-# 1. Animate using the binned arrays
 ani = animate_combined(
-    f_array=linear_binned_f, 
+    f_array=binned_f, 
     smoothed_stack=linear_smoothed_stack, 
     cell_stack=linear_cell_stack, 
     spectra_series=linear_binned_spectra, 
@@ -467,8 +529,8 @@ ani = animate_combined(
 
 if SAVE_VIDEO:
     print("Saving video... This might take a minute.")
-    ani.save("simulation_evolution.mp4", writer="ffmpeg", fps=30, dpi=200)
-    print("Video saved successfully as simulation_evolution.mp4!")
+    ani.save("simulation_ensemble_evolution.mp4", writer="ffmpeg", fps=30, dpi=200)
+    print("Video saved successfully!")
 else:
     print("Playing animation interactively...")
     plt.show()

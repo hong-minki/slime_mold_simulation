@@ -12,8 +12,8 @@ results_dir = os.path.join(SCRIPT_DIR, "../", "results")
 exe_name = "slime_mold_simulation.exe"
 config_name = "sim_config.json"
 
-num_points = 8
-diffusion_rates = np.linspace(26.67, 64, num_points)
+num_points = 10
+diffusion_rates = np.linspace(16, 64, num_points)
 
 def run_sweep():
     os.makedirs(results_dir, exist_ok=True)
@@ -29,7 +29,7 @@ def run_sweep():
     # Python will use this to rewrite the config file from scratch every time.
     base_config = {
         "dt": 0.00001, 
-        "total_timesteps": 3000, 
+        "total_timesteps": 2000, 
         "dx": 1.0, 
         "width": 32, 
         "height": 32, 
@@ -59,7 +59,7 @@ def run_sweep():
             continue
             
         # 4. Create unique results folder
-        sim_result_folder = os.path.join(results_dir, f"Simulation_Dchem_{d_rate_rounded}")
+        sim_result_folder = os.path.join(results_dir, f"Simulation2_Dchem_{d_rate_rounded}")
         os.makedirs(sim_result_folder, exist_ok=True)
         
         # 5. Copy files
