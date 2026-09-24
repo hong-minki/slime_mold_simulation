@@ -385,7 +385,7 @@ def plot_mle_overlap(f_raw, p_raw, f_binned, p_binned, p_err_binned, popt, f_max
 # ==========================================
 # GLOBAL EXECUTION 
 # ==========================================
-PATTERN = "Simulation*_Dchem_16.0" 
+PATTERN = "Simulation*_Dchem_64.0" 
 
 script_dir = Path(__file__).resolve().parent
 results_dir = (script_dir / ".." / ".." / "results").resolve()
@@ -461,7 +461,7 @@ binned_f, binned_spectra, binned_sem = bin_spectra_series(
     combined_spectra_series, 
     bin_width=bin_width 
 )
-window_radius_left = bin_width * 6
+window_radius_left = bin_width * 8
 window_radius_right = bin_width * 6
 
 # --- FIND THE BEST FRAME (Based on Ensemble Mean) ---

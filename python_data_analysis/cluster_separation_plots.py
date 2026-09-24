@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # --- TOGGLE FOR DISCRETE MODEL ANALYSIS ---
-INCLUDE_DISCRETE_MODEL = False  # Set to False to exclude the discrete model
+INCLUDE_DISCRETE_MODEL = True  # Set to False to exclude the discrete model
 # ------------------------------------------
 
 # 1. Load data from CSV
