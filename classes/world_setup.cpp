@@ -50,4 +50,15 @@ std::vector<double> world_setup::chem_conc_field_initialisation_square()
 	return chem_conc_field;
 }
 
+std::vector<double> world_setup::chem_conc_field_initialisation_steady_state()
+{
+	// Calculate mean cell density (rho_0)
+	double rho_0 = static_cast<double>(my_config.total_cells) / my_config.total_grid_points();
 
+	// Calculate uniform theoretical steady state (c_0 = (alpha * rho_0) / gamma)
+	double c_0 = (my_config.chem_secretion_rate * rho_0) / my_config.decay_rate;
+
+	// Initialize the entire grid to this uniform baseline
+	std::vector<double> chem_conc_field(my_config.total_grid_points(), c_0);
+	return chem_conc_field;
+}
