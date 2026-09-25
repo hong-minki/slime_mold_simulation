@@ -48,6 +48,7 @@ SimConfig load_config_from_json(const std::string& filename) {
     cfg.total_cells = extract_int("total_cells");
     cfg.chi = extract_double("chi");
     cfg.Dr = extract_double("Dr");
+	cfg.M = extract_double("M");
 
     return cfg;
 }

@@ -61,7 +61,7 @@ void simulation::diffusion_calculation()
 			int_vector2d coordinates_vector = { x, y };
 
 			int center_index = get_index(coordinates_vector, my_config.width, my_config.height);
-			double chem_conc_new = chem_conc_field[center_index] + my_config.dt * (my_config.diffusion_rate * discrete_laplacian(my_config, coordinates_vector, chem_conc_field)
+			double chem_conc_new = chem_conc_field[center_index] + my_config.dt * my_config.M * (my_config.diffusion_rate * discrete_laplacian(my_config, coordinates_vector, chem_conc_field)
 				- my_config.decay_rate * chem_conc_field[center_index]
 				+ my_config.chem_secretion_rate * num_cells[center_index]);
 			if (chem_conc_new < 0.0) chem_conc_new = 0.0;

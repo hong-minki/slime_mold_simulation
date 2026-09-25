@@ -15,6 +15,9 @@ struct SimConfig {
     double chi;
     double Dr;
 
+	// special parameter for the diffusion calculation
+    double M;
+
     int total_grid_points() const {
         return width * height;
     }

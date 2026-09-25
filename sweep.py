@@ -36,9 +36,10 @@ def run_sweep():
         "diffusion_rate": 16, 
         "decay_rate": 0.1, 
         "chem_secretion_rate": 1.0, 
-        "total_cells": 10240000, # LOWER THIS FOR TESTING IF NEEDED
+        "total_cells": 10240000, 
         "chi": 2.0, 
-        "Dr": 0.5
+        "Dr": 0.5,
+        "M": 300
     }
 
     for i, d_rate in enumerate(diffusion_rates):
@@ -49,7 +50,7 @@ def run_sweep():
         base_config["diffusion_rate"] = d_rate_rounded
         with open(config_path, 'w') as f:
             json.dump(base_config, f, indent=4)
-            
+"""
         # 3. Run the C++ Executable
         try:
             # capture_output=False allows C++ cout statements to print to your Python console
@@ -78,6 +79,7 @@ def run_sweep():
                 print(f"   -> Warning: {file} not found in {base_dir}.")
                 
     print("\nParameter sweep completed successfully.")
+    """
 
 if __name__ == "__main__":
     run_sweep()
