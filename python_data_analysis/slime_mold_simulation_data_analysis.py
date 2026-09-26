@@ -385,7 +385,9 @@ def plot_mle_overlap(f_raw, p_raw, f_binned, p_binned, p_err_binned, popt, f_max
 # ==========================================
 # GLOBAL EXECUTION 
 # ==========================================
-PATTERN = "Simulation*_Dchem_64.0" 
+PATTERN = "Simulation*_new_Dchem_64.0" 
+SAVE_VIDEO = False
+LINEAR_PLOT = True
 
 script_dir = Path(__file__).resolve().parent
 results_dir = (script_dir / ".." / ".." / "results").resolve()
@@ -405,7 +407,7 @@ f_array_single = None
 config = None
 
 step_skip = 10
-SAVE_VIDEO = False
+
 
 # 1. Load and process all simulation folders
 for i, folder_path in enumerate(folder_paths):
@@ -509,23 +511,42 @@ plot_mle_overlap(
     window_radius_right=window_radius_right
 )
 
-plot_max_density(mean_max_density_series, dt, step_skip, mean_cell_density)
 
 linear_smoothed_stack = rep_smoothed_stack[:best_frame_idx]
 linear_cell_stack = rep_cell_stack[:best_frame_idx]
 linear_binned_spectra = binned_spectra[:best_frame_idx]
 linear_binned_sem = binned_sem[:best_frame_idx]
+linear_mean_max_density_series = mean_max_density_series[:best_frame_idx+1]
 
-ani = animate_combined(
-    f_array=binned_f, 
-    smoothed_stack=linear_smoothed_stack, 
-    cell_stack=linear_cell_stack, 
-    spectra_series=linear_binned_spectra, 
-    sem_series=linear_binned_sem, 
-    dt=dt, 
-    step_skip=step_skip, 
-    interval=100
-)
+#linear regime plots
+if LINEAR_PLOT:
+    ani = animate_combined(
+        f_array=binned_f, 
+        smoothed_stack=linear_smoothed_stack, 
+        cell_stack=linear_cell_stack, 
+        spectra_series=linear_binned_spectra, 
+        sem_series=linear_binned_sem, 
+        dt=dt, 
+        step_skip=step_skip, 
+        interval=100
+    )
+    
+    
+    plot_max_density(linear_mean_max_density_series, dt, step_skip, mean_cell_density)
+    
+else:
+    ani =  animate_combined(
+        f_array=binned_f, 
+        smoothed_stack=rep_smoothed_stack, 
+        cell_stack= rep_cell_stack, 
+        spectra_series= binned_spectra, 
+        sem_series= binned_sem, 
+        dt=dt, 
+        step_skip=step_skip, 
+        interval=100
+    )
+    
+    plot_max_density(mean_max_density_series, dt, step_skip, mean_cell_density)
 
 if SAVE_VIDEO:
     print("Saving video... This might take a minute.")
