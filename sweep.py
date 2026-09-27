@@ -11,9 +11,9 @@ base_dir = os.path.join(SCRIPT_DIR, "out", "build", "x64-Debug")
 results_dir = os.path.join(SCRIPT_DIR, "../", "results")
 exe_name = "slime_mold_simulation.exe"
 config_name = "sim_config.json"
-result_folder_name = "Simulation2_new_Dchem"
+result_folder_name = "Simulation4_new_Dchem"
 
-num_points = 10
+num_points = 20
 
 # Define sweep ranges
 diffusion_rates = np.linspace(16, 64, num_points)

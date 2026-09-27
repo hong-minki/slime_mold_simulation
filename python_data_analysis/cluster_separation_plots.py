@@ -8,7 +8,12 @@ INCLUDE_DISCRETE_MODEL = False  # Set to False to exclude the discrete model
 # ------------------------------------------
 
 # 1. Load data from CSV
-df = pd.read_csv('cluster_separation_data_v2.csv')
+df = pd.read_csv('cluster_separation_data_v3.csv')
+
+# --- NEW FILTERING STEP ---
+# Calculate the relative error and keep only rows where it is <= 20% (0.20)
+valid_mask = (df['lambda_max_err'] / df['lambda_max']) <= 0.2
+df = df[valid_mask]
 
 D_chem = df['D_chem'].values
 lambda_max_exp = df['lambda_max'].values
@@ -78,6 +83,7 @@ m_fit_err, C_fit_err = np.sqrt(np.diag(pcov))
 sigma_diff = abs(m_fit - m_continuous) / m_fit_err
 
 # 6. Find the 1st, 2nd, and 3rd closest discrete 2D modes
+
 closest_1_x, closest_1_y = [], []
 closest_2_x, closest_2_y = [], []
 closest_3_x, closest_3_y = [], []
@@ -148,23 +154,6 @@ if INCLUDE_DISCRETE_MODEL:
         sqrt_D_smooth, lambda_smooth_disc, 'g-', linewidth=2, alpha=0.5,
         label=f'Discrete Lattice Theory (1D correction)', zorder=1
     )
-
-# Plot the nearest available 2D modes as ranked scatters
-ax1.scatter(
-    closest_3_x, closest_3_y,
-    color='gold', marker='x', s=60, zorder=5, linewidths=2,
-    label='3rd Closest 2D Mode'
-)
-ax1.scatter(
-    closest_2_x, closest_2_y,
-    color='darkorange', marker='x', s=70, zorder=6, linewidths=2,
-    label='2nd Closest 2D Mode'
-)
-ax1.scatter(
-    closest_1_x, closest_1_y,
-    color='crimson', marker='x', s=80, zorder=7, linewidths=2.5,
-    label='1st Closest 2D Mode'
-)
 
 title_str = r'Cluster Separation: $\lambda_{max}$ vs. $\sqrt{D_{chem}}$'
 ax1.set_title(title_str, fontsize=14)
